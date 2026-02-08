@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+	<!-- Main page of light server -->
+	<head>
+		<meta charset="utf-8" />
+		<title>Light server</title>
+        <link rel="stylesheet" href="style.css" type="text/css" />
+        <script src="translate.js"></script>
+        <script src="logic.js"></script>
+        <script>
+            function loadEdit() {window.location.href = "./edit.htm";}      // Display edit page
+            function loadSetup() {window.location.href = "./setup.htm";}    // Display setup page
+            function executeEvent(e) {loadSelect('fileToStart', './configs');} // Execute event received
+            function $id(name) {return document.getElementById(name);}      // Return an element by id
+            function hideCb(object, divName) {$id(divName).hidden = (object.checked == false);} // Hide div if checkbox not ticked
+        </script>
+	</head>
+    <body onload="loadSelect('fileToStart', './configs');initAll(false);">
+        <div id="header" class="header">
+            <label id="serverName"></label>&nbsp;<label id="serverVersion"></label><br>
+        </div>
+        <div class="center">
+			<fieldset>
+				<legend data-i18n-key="simulation">Simulation</legend>
+                <label data-i18n-key="fileToStart">Configuration file</label>&nbsp;
+                <select id="fileToStart" onchange="changed(this);">
+                </select>
+                <br><br>
+                <label data-i18n-key="startTime">Start time:</label>&nbsp;<input type="number" id="startTimeHour" min="0" max="23" style="width:35px" onchange="changed(this);"/>&nbsp;:&nbsp;<input type="number" id="startTimeMinute" min="0" max="59" style="width:35px" onchange="changed(this);"/>
+                &nbsp;&nbsp;&nbsp;
+                <label data-i18n-key="endTime">End time:</label>&nbsp;<input type="number" id="endTimeHour" min="0" max="23" style="width:35px" onchange="changed(this);"/>&nbsp;:&nbsp;<input type="number" id="endTimeMinute" min="0" max="59" style="width:35px" onchange="changed(this);"/>
+                &nbsp;&nbsp;&nbsp;
+                <label data-i18n-key="cycleTime">Cycle time:</label>&nbsp;<input type="number" id="cycleTime" min="0.5" max="60" step="0.5" style="width:60px" onchange="changed(this);"/><br>
+                &nbsp;&nbsp;&nbsp;
+                <br>
+                <input type="button" class="blueBtn" style="width:175px" data-i18n-key="start" id="start" value="Start" onclick="changed(this);"/>
+                &nbsp;&nbsp;&nbsp;
+                <label id="currentTime"></label>
+                &nbsp;&nbsp;&nbsp;
+                <input type="button" class="blueBtn" style="width:175px" data-i18n-key="stop" id="stop"  value="Stop" onclick="changed(this);"/>
+                <br>
+            </fieldset>
+        </div>
+        <div class = "center">
+            <fieldset>
+                <legend data-i18n-key="agendaFileUpdate"><input type="checkbox" onchange="hideCb(this,'uploadDiv');"/>Agenda file update</legend>
+                <div id="uploadDiv" hidden="true">
+                    <form id="upload" action="/upload" method="POST" enctype="multipart/form-data">
+                        <div>
+                            <input type="file" id="fileSelect" accept=".txt">
+                        </div>
+                    </form>
+                    <div id="fileDrag" data-i18n-key="dropAgendaHere">
+                        Drop agenda file here
+                    </div>
+                </div>
+            </fieldset>
+            <script src="dropFile.js"></script>
+            <div class="center">
+                <br>
+                <input type="button" class="blueBtn" style="width:175px" data-i18n-key="setup" value="Setup" onclick="loadSetup();"/>
+                &nbsp;&nbsp;&nbsp;
+                <input type="button" class="blueBtn" style="width:175px" data-i18n-key="edit" value="Edit" onclick="loadEdit();"/>
+            </div>
+        </div>
+        <div class="center">
+            <label id="wifiState"></label>
+            <br>
+            <label data-i18n-key="freeMemory"></label>&nbsp;<label id="freeMemory"></label>
+            &nbsp;&nbsp;&nbsp;<label data-i18n-key="largestChunk"></label>&nbsp;<label id="largestChunk"></label>
+            <br>
+            <label id="agendaState"></label>
+            <br>
+        </div>
+        <hr />
+        <div id="messages" class="largeScroll, center"></div>
+    </body>
+</html>
