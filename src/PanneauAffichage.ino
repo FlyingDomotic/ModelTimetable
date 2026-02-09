@@ -1,6 +1,4 @@
-#define VERSION "26.2.9-1"
-
-// Charger les messages passés à la mise en route
+#define VERSION "26.2.9-2"
 
 /*
  *     English: Model timetable for train based on ESP8266 or ESP32
@@ -240,8 +238,8 @@ String wifiState = emptyChar;                                       // Wifi conn
 // Define TFT storage
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
-#define OUT_OF_SERVICE_MESSAGE (MAX_LINES)                        // Index of out of service messahe in screenLines
-#define OUT_OF_SERVICE_TEXT (MAX_LINES+1)                             // Index of out of service text in screenLines
+#define OUT_OF_SERVICE_MESSAGE (MAX_LINES)                          // Index of out of service messahe in screenLines
+#define OUT_OF_SERVICE_TEXT (MAX_LINES+1)                           // Index of out of service text in screenLines
 #define SCREEN_LINES (MAX_LINES+2)                                  // ScreenLine size
 
 #ifdef VERSION_FRANCAISE
@@ -498,7 +496,8 @@ bool isDebugCommand(const String givenCommand);
 uint8_t getLineTopPixel(const uint8_t row);
 uint8_t getCharLeftPixel(const uint8_t column);
 void setOutOfService(const char* text, const char* message=emptyChar, 
-    const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
+    const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK,
+    bool executeDisplay=true);
 void setDefaultOutOfService(const char* message=emptyChar, 
     const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
 void setTitle(const char* title);
@@ -518,7 +517,7 @@ void displayParameterChanged(void);
 void formatTime(const int time, char* buffer, const size_t bufferLen, const char* prefix = emptyChar);
 void startDisplay(void);
 void stopDisplay(void);
-void setAgendaLine(uint16_t index);
+void setAgendaLine(uint16_t index, bool executeDisplay=true);
 void refreshPanel(void);
 uint16_t deltaTime (const uint16_t candidateTime);
 void clearDisplay(void);
@@ -1892,7 +1891,9 @@ void setDefaultOutOfService(const char* message, const uint16_t textColor, const
 }
 
 // Set out of service text
-void setOutOfService(const char* text, const char* message, const uint16_t textColor, const uint16_t backgroundColor) {
+void setOutOfService(const char* text, const char* message, 
+        const uint16_t textColor, const uint16_t backgroundColor,
+        bool executeDisplay) {
     myStrncpy(screenLines[OUT_OF_SERVICE_MESSAGE].text, message, LINE_CHARACTERS+1);
     screenLines[OUT_OF_SERVICE_MESSAGE].textColor = ST7735_WHITE;
     screenLines[OUT_OF_SERVICE_MESSAGE].oddBackgroundColor = ST7735_BLACK;
@@ -1903,7 +1904,7 @@ void setOutOfService(const char* text, const char* message, const uint16_t textC
     screenLines[OUT_OF_SERVICE_TEXT].evenBackgroundColor = backgroundColor;
     // Reset switcht imer to avoid too short time before switching
     lastSwitchTime = millis();
-    updateScreen();
+    if (executeDisplay) updateScreen();
 }
 
 // Return top position of text line (starts at 0)
@@ -2040,6 +2041,7 @@ void displayLoop(void) {
                     trace_info_P("Agenda %d, now %s", agendaIndex+AGENDA_OFFSET, buffer);
                 #endif
                 while (agendaIndex < agendaCount && agendaTable[agendaIndex].time <= simulationTime) {
+                    setAgendaLine(agendaIndex);
                     agendaIndex++;
                 }
                 if (additionalMessageChanged) {
@@ -2062,7 +2064,7 @@ void displayLoop(void) {
                 additionalMessageChanged = false;
                 // Position index to start time
                 while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
-                    setAgendaLine(agendaIndex);
+                    setAgendaLine(agendaIndex, false);
                     agendaIndex++;
                 }
                 if (additionalMessageChanged) {
@@ -2141,13 +2143,14 @@ void startDisplay(void) {
         additionalMessageChanged = false;
         // Play one time all events
         while (agendaIndex < agendaCount) {
-            setAgendaLine(agendaIndex);
+            setAgendaLine(agendaIndex, false);
             agendaIndex++;
         }
+        simulationTime = simulationStart;
         agendaIndex = 0;
         // Position index to start time
         while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
-            setAgendaLine(agendaIndex);
+            setAgendaLine(agendaIndex, false);
             agendaIndex++;
         }
         if (additionalMessageChanged) {
@@ -2171,7 +2174,7 @@ void stopDisplay(void) {
 }
 
 // Load additional line from agenda index
-void setAgendaLine(uint16_t index){
+void setAgendaLine(uint16_t index, bool executeDisplay){
     if (agendaTable[index].lineType == typeFixedMessage) {
         additionalMessageChanged = true;
         if (agendaTable[index].message[0]) {
@@ -2211,7 +2214,8 @@ void setAgendaLine(uint16_t index){
             additionalMessage[0] = 0;
         }
     } else if (agendaTable[index].lineType == typeOutOfService) {
-        setOutOfService(agendaTable[index].message, emptyChar, agendaTable[index].textColor, agendaTable[index].backgroundColor);
+        setOutOfService(agendaTable[index].message, emptyChar, 
+            agendaTable[index].textColor, agendaTable[index].backgroundColor, executeDisplay);
     }
 }
 
@@ -2322,15 +2326,15 @@ void updateScreen (const bool forced) {
             uint8_t fillLen = min(messageLen + (colOffset << 1), SCREEN_WIDTH); // Length to fill
             tft.fillRect(startFill, centerRow-1, fillLen, PIXEL_HEIGHT+2, 
                 screenLines[OUT_OF_SERVICE_TEXT].oddBackgroundColor); // Clear zone under text, limit to text + offset
-            tft.setCursor(startCol, centerRow);                         // Position cursor
+            tft.setCursor(startCol, centerRow);                     // Position cursor
             tft.setTextColor(screenLines[OUT_OF_SERVICE_TEXT].textColor);
-            tft.print(screenLines[OUT_OF_SERVICE_TEXT].text);  // Display OOS message
+            tft.print(screenLines[OUT_OF_SERVICE_TEXT].text);       // Display OOS message
             saveScreen(OUT_OF_SERVICE_TEXT);
         }
         // Do we have an out of service message?
         if (forced || didLineChanged(OUT_OF_SERVICE_MESSAGE)) {
             if (isNotEmpty(screenLines[OUT_OF_SERVICE_MESSAGE].text)) {
-            updateLine(OUT_OF_SERVICE_MESSAGE, MAX_LINES-1, forced);
+                updateLine(OUT_OF_SERVICE_MESSAGE, MAX_LINES-1, forced);
             }
             saveScreen(OUT_OF_SERVICE_MESSAGE);
         }

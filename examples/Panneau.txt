@@ -1,21 +1,21 @@
 Heure;Type;Ville/message;Quai/CouleurTexte;Train/CouleurFond
 00:00;HS;GARE FERMEE;rouge;blanc    # Message hors service
-00:20;HS                            # Passe en mode normal
-00:20;MD;La gare ouvrira a 5h       # Affiche un message défilant
+04:20;HS                            # Passe en mode normal
+04:20;MD;La gare ouvrira a 5h       # Affiche un message défilant
 05:00;MD                            # Fin du message défilant
 05:41;D;ORLEANS;D;5425              # Début des arrivées/départs
 06:03;D;MARSEILLE;B;1333
 06:16;D;GENEVE;3;7140
-06:17;MF;ATTENTION AU TRAIN!;ROUGE;BLANC
+06:17;MF;ATTENTION AU TRAIN!;ROUGE;BLANC    # Message fixe
 06:18;A;ORLEANS;3;5428
 06:20;D;LYON;C;5194
 06:22;D;ORLEANS;E;1570
-06:23;MC;DEPART IMMINENT!;ROUGE;BLANC
+06:23;MC;DEPART IMMINENT!;ROUGE;BLANC       # Message clignotant
 06:25;D;CHATEAUDUN;D;1520
 06:28;D;TOULOUSE;C;8675
 06:36;D;MARSEILLE;G;4854
 06:40;D;PERPIGNAN;A;8742
-06:41;MD;ATTENTION AU TRAIN!;ROUGE;BLANC
+06:41;MD;ATTENTION AU TRAIN!;ROUGE;BLANC    # Message défilant
 06:42;D;ORLEANS;B;9115
 06:45;D;ANNECY;3;6430
 06:48;A;LAROCHE;F;9920
@@ -27,7 +27,7 @@ Heure;Type;Ville/message;Quai/CouleurTexte;Train/CouleurFond
 07:08;A;TOULOUSE;2;4955
 07:12;D;NANTES;3;1127
 07:13;D;AVIGNON;A;6953
-07:18;MF
+07:18;MF                                    # Efface le message
 07:20;A;ORLEANS;H;6570
 07:22;D;ZURICH;2;1553
 07:26;D;LYON;2;4628
