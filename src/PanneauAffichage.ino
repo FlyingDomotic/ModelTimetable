@@ -1,4 +1,6 @@
-#define VERSION "26.2.8-1"
+#define VERSION "26.2.9-1"
+
+// Charger les messages passés à la mise en route
 
 /*
  *     English: Model timetable for train based on ESP8266 or ESP32
@@ -143,6 +145,7 @@
     #endif
 #endif
 
+char emptyChar[] = "";                                              // Empty string
 char savedLogLines[LOG_MAX_LINES][LOG_LINE_LEN];                    // Buffer to save last log lines
 uint16_t savedLogNextSlot = 0;                                      // Address of next slot to be written
 uint16_t logRequestNextLog = 0;                                     // Address of next slot to be send for a /log request
@@ -167,7 +170,7 @@ uint16_t logRequestNextLog = 0;                                     // Address o
 #include <littleFsEditor.h>                                         // LittleFS file system editor
 AsyncWebServer webServer(80);                                       // Web server on port 80
 AsyncEventSource events("/events");                                 // Event root
-String lastUploadedFile = "";                                       // Name of last download file
+String lastUploadedFile = emptyChar;                                // Name of last download file
 int lastUploadStatus = 0;                                           // HTTP last error code
 
 //  ---- Preferences ----
@@ -200,9 +203,9 @@ uint16_t endTimeMinute = 59;                                        //      and 
 float cycleTime = 10.0;                                             // Cycle duration in minutes
 
 //  ---- Local to this program ----
-String resetCause = "";                                             // Used to save reset cause
+String resetCause = emptyChar;                                      // Used to save reset cause
 bool sendAnUpdateFlag = false;                                      // Should we send an update?
-String wifiState = "";                                              // Wifi connection state
+String wifiState = emptyChar;                                       // Wifi connection state
 
 //  ---- Serial commands ----
 #ifdef SERIAL_COMMANDS
@@ -251,6 +254,7 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 const uint8_t screenFlagNone = 0;                                   // No flags
 const uint8_t screenFlagTimeTableLine = 1;                          // This is a timetable line (else standard)
 const uint8_t screenFlagCentered = 2;                               // Line is centered (else set left)
+const uint8_t screenFlagCenterBackground = 4;                       // Line is centered (else set left)
 const uint8_t screenFlagDontTrace = 128;                            // Don't trace line change
 
 // Screen storage
@@ -374,7 +378,7 @@ typedef enum {
 
 typedef enum {
     unknown = 0,
-    fixed,                                                          // Message is fexed
+    fixed,                                                          // Message is fixed
     blinking,                                                       // Blink for one second
     scrolling                                                       // Scroll
 } messageType_t;
@@ -383,7 +387,6 @@ int agendaError = -1;                                               // Error cod
 char lastErrorMessage[100] = {0};                                   // Last agenda loading error message
 uint16_t agendaIndex = 0;                                           // Current position in agenda
 fileFormat_t fileFormat = unknownFileFormat;                        // Current header file format
-char emptyChar[] = "";                                              // Empty file name
 char configurationName[32] = {0};                                   // Configuration file name
 int tableLineNumber = 0;                                            // Table line number
 int fileLineNumber = 0;                                             // File line number
@@ -395,6 +398,7 @@ uint8_t additionalMessageIndex;                                     // Additiona
 unsigned long additionalMessageLastTime = 0;                        // Last time we did something on additional message
 unsigned long additionalMessageStepDuration = 1000;                 // Additional message duration between indexes (ms)
 messageType_t additionalMessageType;                                // Has an additional message to display
+bool additionalMessageChanged = false;                              // Does additional message change in setAgendaLine?
 displayParams_s displayParams[2];                                   // Parameters for arrival and departure
 unsigned long lastSwitchTime = 0;                                   // Last time we switched type
 uint8_t currentType = DISPLAY_UNKNOWN;                              // Current displayed type
@@ -493,23 +497,28 @@ bool isDebugCommand(const String givenCommand);
 
 uint8_t getLineTopPixel(const uint8_t row);
 uint8_t getCharLeftPixel(const uint8_t column);
-void setOutOfService(const char* text, const char* message=emptyChar, const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
-void setDefaultOutOfService(const char* message=emptyChar, const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
+void setOutOfService(const char* text, const char* message=emptyChar, 
+    const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
+void setDefaultOutOfService(const char* message=emptyChar, 
+    const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
 void setTitle(const char* title);
 void setText(const char* text, const int row, const int textColor, const int oddRowColor, const int evenRowColor,
-    const bool timeTableLine=true, bool const dontTrace=false, bool const center=false);
-void setCenter(const char* text, const uint8_t row, const uint16_t textColor, const uint16_t backgroundColor, const bool dontTrace=false);
+    const bool timeTableLine=true, bool const dontTrace=false, bool const center=false, const bool centerBackground=false);
+void setCenter(const char* text, const uint8_t row, const uint16_t textColor,
+    const uint16_t backgroundColor, const bool dontTrace=false, const bool centerBackground=false);
 bool setScroll(char* scrolledText, const char* text, const uint8_t pointer);
 bool isNotEmpty(char toTest);
 void displaySetup(void);
 void displayLoop(void);
 void updateScreen (const bool forced=false);
 void updateLine(const uint8_t row, const uint8_t index, const bool forced=false);
+size_t lineLen(char* line);
 void displayAdditionalMessage(void);
 void displayParameterChanged(void);
 void formatTime(const int time, char* buffer, const size_t bufferLen, const char* prefix = emptyChar);
 void startDisplay(void);
 void stopDisplay(void);
+void setAgendaLine(uint16_t index);
 void refreshPanel(void);
 uint16_t deltaTime (const uint16_t candidateTime);
 void clearDisplay(void);
@@ -517,7 +526,7 @@ void uploadLoop(void);
 uint8_t decodeHex(const char* hexa);
 void clearMessage(char* message);
 void setMessage(char* message, const char* data, const uint16_t offset, const uint16_t length);
-
+void myStrncpy(char* destination, const char* source, const size_t size);
 //  ---- Agenda routines ----
 
 // Parameters for a readallFile callbacks
@@ -1361,7 +1370,7 @@ void setChangedReceived(AsyncWebServerRequest *request) {
                 char msg[70];                                       // Buffer for message
                 snprintf_P(msg, sizeof(msg),PSTR("<status>Bad field name %s</status>"), fieldName.c_str());
                 checkFreeBufferSpace(__func__, __LINE__, "msg", sizeof(msg), strlen(msg));
-                request->send(400, "", msg);
+                request->send(400, emptyChar, msg);
                 return;
             }
             if (!dontWriteSettings) writeSettings();
@@ -1375,11 +1384,11 @@ void setChangedReceived(AsyncWebServerRequest *request) {
             char msg[70];                                           // Buffer for message
             snprintf_P(msg, sizeof(msg),PSTR("<status>No field name</status>"));
             checkFreeBufferSpace(__func__, __LINE__, "msg", sizeof(msg), strlen(msg));
-            request->send(400, "", msg);
+            request->send(400, emptyChar, msg);
             return;
         }
     }
-    request->send(200, "", "<status>Ok</status>");
+    request->send(200, emptyChar, "<status>Ok</status>");
 }
 
 // Called when /languages command is received
@@ -1493,8 +1502,8 @@ void commandReceived(AsyncWebServerRequest *request) {
     #else
         trace_debug_P("Received %s", position.c_str());
     #endif
-    String commandName = "";
-    String commandValue = "";
+    String commandName = emptyChar;
+    String commandValue = emptyChar;
     int separator1 = position.indexOf("/");                         // Position of first "/"
     if (separator1 >= 0) {
         int separator2 = position.indexOf("/", separator1+1);       // Position of second "/"
@@ -1517,7 +1526,7 @@ void commandReceived(AsyncWebServerRequest *request) {
             char msg[70];                                           // Buffer for message
             snprintf_P(msg, sizeof(msg),PSTR("<status>Bad command name %s</status>"), commandName.c_str());
             checkFreeBufferSpace(__func__, __LINE__, "msg", sizeof(msg), strlen(msg));
-            request->send(400, "", msg);
+            request->send(400, emptyChar, msg);
             return;
         }
     } else {
@@ -1529,10 +1538,10 @@ void commandReceived(AsyncWebServerRequest *request) {
         char msg[70];                                               // Buffer for message
         snprintf_P(msg, sizeof(msg),PSTR("<status>No command name</status>"));
         checkFreeBufferSpace(__func__, __LINE__, "msg", sizeof(msg), strlen(msg));
-        request->send(400, "", msg);
+        request->send(400, emptyChar, msg);
         return;
     }
-    request->send(200, "", "<status>Ok</status>");
+    request->send(200, emptyChar, "<status>Ok</status>");
 }
 
 // Called when /log is received - Send saved log, line by line
@@ -1545,7 +1554,7 @@ void logReceived(AsyncWebServerRequest *request) {
             // Get message
             String message = getLogLine(logRequestNextLog++);
             // If not empty
-            if (message != "") {
+            if (message != emptyChar) {
                 // Compute message len (adding a "\n" at end)
                 size_t chunkSize = min(message.length(), maxLen-1)+1;
                 // Copy message
@@ -1587,6 +1596,19 @@ void tableReceived(AsyncWebServerRequest *request) {
             }
             tableRow++;                                             // Next table index
             if (tableRow >= agendaCount) {                          // Are we at end of table?
+                tablePtr++;                                         // Next table
+                tableRow = 0;                                       // Clear index
+            }
+        } else if (tablePtr ==  1) {                                // Screen table
+            if (!tableRow)  {                                       // Set header
+                snprintf_P(header, sizeof(header), "Row Flg TxtC OddC  EveC Message (Screen)\n");
+            }
+            snprintf_P((char*) buffer, maxLen, "%s%3d %3d %04x %04x %04x %s\n", header, tableRow,
+                screenLines[tableRow].flags, screenLines[tableRow].textColor,
+                screenLines[tableRow].oddBackgroundColor, screenLines[tableRow].evenBackgroundColor,
+                screenLines[tableRow].text);
+            tableRow++;                                             // Next table index
+            if (tableRow >= SCREEN_LINES) {                         // Are we at end of table?
                 tablePtr++;                                         // Next table
                 tableRow = 0;                                       // Clear index
             }
@@ -1718,7 +1740,7 @@ String extractItem(const String candidate, const uint16_t index, const String se
         }
         startPosition = endPosition+1;
     }
-    return "";
+    return emptyChar;
 }
 
 // Check for remaining space into a buffer
@@ -1858,6 +1880,12 @@ void setMessage(char* message, const char* data, const uint16_t offset, const ui
     } 
 }
 
+// Copy a screen line
+void myStrncpy(char* destination, const char* source, const size_t size){
+    strncpy(destination, source, size);                // Copy source up to size
+    destination[size-1] = 0;                           // Force a \0 at end of string
+}
+
 // Set default out of service text
 void setDefaultOutOfService(const char* message, const uint16_t textColor, const uint16_t backgroundColor) {
     setOutOfService((char *) DEFAULT_OUT_OF_SERVICE, message, textColor, backgroundColor);
@@ -1865,14 +1893,16 @@ void setDefaultOutOfService(const char* message, const uint16_t textColor, const
 
 // Set out of service text
 void setOutOfService(const char* text, const char* message, const uint16_t textColor, const uint16_t backgroundColor) {
-    memcpy(screenLines[OUT_OF_SERVICE_MESSAGE].text, message, LINE_CHARACTERS+1);
+    myStrncpy(screenLines[OUT_OF_SERVICE_MESSAGE].text, message, LINE_CHARACTERS+1);
     screenLines[OUT_OF_SERVICE_MESSAGE].textColor = ST7735_WHITE;
     screenLines[OUT_OF_SERVICE_MESSAGE].oddBackgroundColor = ST7735_BLACK;
     screenLines[OUT_OF_SERVICE_MESSAGE].evenBackgroundColor = ST7735_BLACK;
-    memcpy(screenLines[OUT_OF_SERVICE_TEXT].text, text, LINE_CHARACTERS+1);
+    myStrncpy(screenLines[OUT_OF_SERVICE_TEXT].text, text, LINE_CHARACTERS+1);
     screenLines[OUT_OF_SERVICE_TEXT].textColor = textColor;
     screenLines[OUT_OF_SERVICE_TEXT].oddBackgroundColor = backgroundColor;
     screenLines[OUT_OF_SERVICE_TEXT].evenBackgroundColor = backgroundColor;
+    // Reset switcht imer to avoid too short time before switching
+    lastSwitchTime = millis();
     updateScreen();
 }
 
@@ -1889,12 +1919,13 @@ uint8_t getCharLeftPixel(const uint8_t column) {
 // Set screen title (first 2 lignes)
 void setTitle(const char* title) {
     setCenter(title, 0, ST7735_WHITE, ST7735_BLACK);
-    setCenter("", 1, ST7735_BLACK, ST7735_BLACK);
+    setCenter(emptyChar, 1, ST7735_BLACK, ST7735_BLACK);
 }
 
 // Center a line on screen
-void setCenter(const char* text, const uint8_t row, const uint16_t textColor, const uint16_t backgroundColor, const bool dontTrace) {
-    setText(text, row, textColor, backgroundColor, backgroundColor, false, dontTrace, true);
+void setCenter(const char* text, const uint8_t row, const uint16_t textColor, const uint16_t backgroundColor,
+        const bool dontTrace, const bool centerBackground) {
+    setText(text, row, textColor, backgroundColor, backgroundColor, false, dontTrace, true, centerBackground);
 }
 
 // Overwrite a buffer with scrolled text giving a pointer (return true on pointer overflow)
@@ -1919,15 +1950,16 @@ bool isNotEmpty(char* toTest){
 
 // Set text line given a text color, and a background color for odd and even row
 void setText(const char* text, const int row, const int textColor, const int oddRowColor, const int evenRowColor,
-        const bool timeTableLine, const bool dontTrace, const bool center) {
-    memcpy(screenLines[row].text, text, LINE_CHARACTERS+1);
+        const bool timeTableLine, const bool dontTrace, const bool center, const bool centerBackground) {
+    myStrncpy(screenLines[row].text, text, LINE_CHARACTERS+1);
     screenLines[row].textColor = textColor;
     screenLines[row].oddBackgroundColor = oddRowColor;
     screenLines[row].evenBackgroundColor = evenRowColor;
     screenLines[row].flags =
-        timeTableLine? screenFlagTimeTableLine : screenFlagNone +
-        dontTrace? screenFlagDontTrace : screenFlagNone +
-        center? screenFlagDontTrace : screenFlagNone;
+        (timeTableLine? screenFlagTimeTableLine : screenFlagNone) |
+        (dontTrace? screenFlagDontTrace : screenFlagNone) |
+        (center? screenFlagCentered : screenFlagNone) |
+        (centerBackground? screenFlagCenterBackground : screenFlagNone);
 }
 
 // Setup for displays
@@ -2007,49 +2039,7 @@ void displayLoop(void) {
                 #else
                     trace_info_P("Agenda %d, now %s", agendaIndex+AGENDA_OFFSET, buffer);
                 #endif
-                bool additionalMessageChanged = false;
                 while (agendaIndex < agendaCount && agendaTable[agendaIndex].time <= simulationTime) {
-                    if (agendaTable[agendaIndex].lineType == typeFixedMessage) {
-                        additionalMessageChanged = true;
-                        if (agendaTable[agendaIndex].message[0]) {
-                            additionalMessageType = fixed;
-                            additionalMessageStepDuration = 1000;
-                            strcpy(additionalMessage, agendaTable[agendaIndex].message);
-                            additionalMessageBackgroundColor = agendaTable[agendaIndex].backgroundColor;
-                            additionalMessageTextColor = agendaTable[agendaIndex].textColor;
-                        } else {
-                            additionalMessageType = unknown;
-                            additionalMessage[0] = 0;
-                        }
-                    } else if (agendaTable[agendaIndex].lineType == typeBlinkingMessage) {
-                        additionalMessageChanged = true;
-                        if (agendaTable[agendaIndex].message[0]) {
-                            additionalMessageType = blinking;
-                            additionalMessageStepDuration = 1000;
-                            additionalMessageIndex = 0;
-                            strcpy(additionalMessage, agendaTable[agendaIndex].message);
-                            additionalMessageBackgroundColor = agendaTable[agendaIndex].backgroundColor;
-                            additionalMessageTextColor = agendaTable[agendaIndex].textColor;
-                        } else {
-                            additionalMessageType = unknown;
-                            additionalMessage[0] = 0;
-                        }
-                    } else if (agendaTable[agendaIndex].lineType == typeScrollingMessage) {
-                        additionalMessageChanged = true;
-                        if (agendaTable[agendaIndex].message[0]) {
-                            additionalMessageType = scrolling;
-                            additionalMessageStepDuration = 200;
-                            additionalMessageIndex = 0;
-                            strcpy(additionalMessage, agendaTable[agendaIndex].message);
-                            additionalMessageBackgroundColor = agendaTable[agendaIndex].backgroundColor;
-                            additionalMessageTextColor = agendaTable[agendaIndex].textColor;
-                        } else {
-                            additionalMessageType = unknown;
-                            additionalMessage[0] = 0;
-                        }
-                    } else if (agendaTable[agendaIndex].lineType == typeOutOfService) {
-                        setOutOfService(agendaTable[agendaIndex].message, emptyChar, agendaTable[agendaIndex].textColor, agendaTable[agendaIndex].backgroundColor);
-                    }
                     agendaIndex++;
                 }
                 if (additionalMessageChanged) {
@@ -2069,9 +2059,15 @@ void displayLoop(void) {
                     trace_info_P("Going from %s to %s", buffer, buffer2);
                 #endif
                 agendaIndex = 0;                                    // Reset agendaIndex
+                additionalMessageChanged = false;
                 // Position index to start time
                 while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
+                    setAgendaLine(agendaIndex);
                     agendaIndex++;
+                }
+                if (additionalMessageChanged) {
+                    trace_debug_P("Message >%s<, type %d", additionalMessage, additionalMessageType);
+                    displayAdditionalMessage();
                 }
             }
             refreshPanel();
@@ -2092,7 +2088,7 @@ void displayAdditionalMessage() {
     } 
     if (additionalMessageType == blinking) {
         if (additionalMessageIndex & 1) {
-            setCenter("", MAX_DETAIL_LINES + 1, additionalMessageTextColor,
+            setCenter(emptyChar, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
                 additionalMessageBackgroundColor, true);
         } else {
             setCenter(additionalMessage, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
@@ -2142,10 +2138,21 @@ void startDisplay(void) {
         // Turn everything off
         setOutOfService(emptyChar);
         agendaIndex = 0;
-        simulationTime = simulationStart;
+        additionalMessageChanged = false;
+        // Play one time all events
+        while (agendaIndex < agendaCount) {
+            setAgendaLine(agendaIndex);
+            agendaIndex++;
+        }
+        agendaIndex = 0;
         // Position index to start time
         while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
+            setAgendaLine(agendaIndex);
             agendaIndex++;
+        }
+        if (additionalMessageChanged) {
+            trace_debug_P("Message >%s<, type %d", additionalMessage, additionalMessageType);
+            displayAdditionalMessage();
         }
     }
     sendAnUpdateFlag = true;
@@ -2161,6 +2168,51 @@ void stopDisplay(void) {
         trace_info("Stoping simulation");
     #endif
     sendAnUpdateFlag = true;
+}
+
+// Load additional line from agenda index
+void setAgendaLine(uint16_t index){
+    if (agendaTable[index].lineType == typeFixedMessage) {
+        additionalMessageChanged = true;
+        if (agendaTable[index].message[0]) {
+            additionalMessageType = fixed;
+            additionalMessageStepDuration = 1000;
+            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
+            additionalMessageTextColor = agendaTable[index].textColor;
+        } else {
+            additionalMessageType = unknown;
+            additionalMessage[0] = 0;
+        }
+    } else if (agendaTable[index].lineType == typeBlinkingMessage) {
+        additionalMessageChanged = true;
+        if (agendaTable[index].message[0]) {
+            additionalMessageType = blinking;
+            additionalMessageStepDuration = 1000;
+            additionalMessageIndex = 0;
+            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
+            additionalMessageTextColor = agendaTable[index].textColor;
+        } else {
+            additionalMessageType = unknown;
+            additionalMessage[0] = 0;
+        }
+    } else if (agendaTable[index].lineType == typeScrollingMessage) {
+        additionalMessageChanged = true;
+        if (agendaTable[index].message[0]) {
+            additionalMessageType = scrolling;
+            additionalMessageStepDuration = 200;
+            additionalMessageIndex = 0;
+            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
+            additionalMessageTextColor = agendaTable[index].textColor;
+        } else {
+            additionalMessageType = unknown;
+            additionalMessage[0] = 0;
+        }
+    } else if (agendaTable[index].lineType == typeOutOfService) {
+        setOutOfService(agendaTable[index].message, emptyChar, agendaTable[index].textColor, agendaTable[index].backgroundColor);
+    }
 }
 
 // Clear display
@@ -2198,13 +2250,13 @@ void refreshPanel(void) {
                 || (agendaData.lineType == typeDeparture && currentType == DISPLAY_DEPARTURE)) {
             char message[LINE_CHARACTERS+1];                        // Create a message
             clearMessage(message);                                  // Clear it
-            memcpy(message, agendaData.message, LINE_CHARACTERS+1); // Copy message
+            myStrncpy(message, agendaData.message, LINE_CHARACTERS+1); // Copy message
             // Clear track if line too far from now
             if (deltaTime(agendaTable[i].time) > displayParams[currentType].maxTrackDelay) {
                 setMessage(message, " ", TRACK_OFFSET, TRACK_LENGTH);
             }
             setText(message, line+DETAIL_LINES_OFFSET,              // Display line at right place with right color
-                ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor);
+                ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor, true);
             line++;                                                 // Increment line count
         }
         i++;                                                        // Next agenda line
@@ -2213,8 +2265,8 @@ void refreshPanel(void) {
         if (line >= maxLine) break;                                 // Exit if we fully loaded table
     }
     for (; line < maxLine; line++) {
-        setText("", line+DETAIL_LINES_OFFSET,                       // Display line at right place with right color
-            ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor);
+        setText(emptyChar, line+DETAIL_LINES_OFFSET,                       // Display line at right place with right color
+            ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor, true);
 
     }
     updateScreen();
@@ -2232,7 +2284,7 @@ bool didLineChanged(const uint8_t row) {
 
 // Save new values of a screen line
 void saveScreen(const uint8_t row) {
-    memcpy(previousLines[row].text, screenLines[row].text, LINE_CHARACTERS+1);
+    myStrncpy(previousLines[row].text, screenLines[row].text, LINE_CHARACTERS+1);
     previousLines[row].textColor = screenLines[row].textColor;
     previousLines[row].oddBackgroundColor = screenLines[row].oddBackgroundColor;
     previousLines[row].evenBackgroundColor = screenLines[row].evenBackgroundColor;
@@ -2263,8 +2315,13 @@ void updateScreen (const bool forced) {
             tft.drawLine(0, SCREEN_HEIGHT-1, SCREEN_WIDTH-1, 0, ST7735_RED);
             tft.drawLine(1, SCREEN_HEIGHT-1, SCREEN_WIDTH-1, 1, ST7735_RED);
             uint8_t centerRow = (SCREEN_HEIGHT/2) - (PIXEL_HEIGHT/2);   // Screen center - half character height
-            uint8_t startCol = (SCREEN_WIDTH - (strlen(screenLines[OUT_OF_SERVICE_TEXT].text) * PIXEL_WIDTH)) / 2; // Compute start column (center text)
-            tft.fillRect(0, centerRow-1, SCREEN_WIDTH, PIXEL_HEIGHT+2, screenLines[OUT_OF_SERVICE_TEXT].oddBackgroundColor); // Clear zone under text
+            uint8_t messageLen = strlen(screenLines[OUT_OF_SERVICE_TEXT].text) * PIXEL_WIDTH;
+            uint8_t startCol = (SCREEN_WIDTH - messageLen) / 2;     // Compute start column (center text)
+            const uint8_t colOffset = 2;                            // Offset before and after text
+            uint8_t startFill = max(startCol - colOffset, 0);       // Column to start filling background
+            uint8_t fillLen = min(messageLen + (colOffset << 1), SCREEN_WIDTH); // Length to fill
+            tft.fillRect(startFill, centerRow-1, fillLen, PIXEL_HEIGHT+2, 
+                screenLines[OUT_OF_SERVICE_TEXT].oddBackgroundColor); // Clear zone under text, limit to text + offset
             tft.setCursor(startCol, centerRow);                         // Position cursor
             tft.setTextColor(screenLines[OUT_OF_SERVICE_TEXT].textColor);
             tft.print(screenLines[OUT_OF_SERVICE_TEXT].text);  // Display OOS message
@@ -2272,7 +2329,9 @@ void updateScreen (const bool forced) {
         }
         // Do we have an out of service message?
         if (forced || didLineChanged(OUT_OF_SERVICE_MESSAGE)) {
+            if (isNotEmpty(screenLines[OUT_OF_SERVICE_MESSAGE].text)) {
             updateLine(OUT_OF_SERVICE_MESSAGE, MAX_LINES-1, forced);
+            }
             saveScreen(OUT_OF_SERVICE_MESSAGE);
         }
         return;
@@ -2293,10 +2352,18 @@ void updateScreen (const bool forced) {
     }
 }
 
+// Return a screen line length (trimming ending spaces)
+size_t lineLen(char* line) {
+    for (uint8_t i=LINE_CHARACTERS; i>0; i--) {
+        if (line[i-1] != 32) return i;
+    }
+    return 0;
+}
+
 // Display a new line at a given row and index
 void updateLine(const uint8_t row, const uint8_t index, const bool forced) {
     // Trace if requested
-    if (forced || didLineChanged(index)) {
+    if (forced || !(screenLines[index].flags & screenFlagDontTrace)) {
         if (traceVerbose) {
             #ifdef VERSION_FRANCAISE
                 trace_debug_P("Ligne %d >%s< flags %d", index, screenLines[index].text, screenLines[index].flags);
@@ -2305,21 +2372,21 @@ void updateLine(const uint8_t row, const uint8_t index, const bool forced) {
             #endif
         }
     }
+    // Screen is not anymore cleared
     screenCleared = false;
     // Fill a full text line with color
     tft.fillRect(0, getLineTopPixel(index), SCREEN_WIDTH, PIXEL_HEIGHT, 
         index&1 ? screenLines[index].evenBackgroundColor : screenLines[index].oddBackgroundColor);
 
     // Clear inter column text for timetable lines
-    if ((screenLines[index].flags && screenFlagTimeTableLine)) {
-        tft.fillRect(getCharLeftPixel(5) + (PIXEL_WIDTH / 2), getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
-        tft.fillRect(getCharLeftPixel(19) + (PIXEL_WIDTH / 2), getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
-        tft.fillRect(getCharLeftPixel(21) + (PIXEL_WIDTH / 2), getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
+    if ((screenLines[index].flags & screenFlagTimeTableLine)) {
+        tft.fillRect(getCharLeftPixel(5) + (PIXEL_WIDTH / 2) -2, getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
+        tft.fillRect(getCharLeftPixel(19) + (PIXEL_WIDTH / 2) -2, getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
+        tft.fillRect(getCharLeftPixel(21) + (PIXEL_WIDTH / 2) -2, getLineTopPixel(index), 2, PIXEL_HEIGHT, ST7735_BLACK);
     }
     // Do we have something to display?
     if (isNotEmpty(screenLines[index].text)) {
-        // Compute start column if centered
-        uint8_t startCol = (screenLines[index].flags && screenFlagCentered) ?
+        uint8_t startCol = (screenLines[index].flags & screenFlagCentered) ?
             (SCREEN_WIDTH - (strlen(screenLines[index].text) * PIXEL_WIDTH)) / 2 : 0;
         tft.setCursor(startCol, getLineTopPixel(index));
         tft.setTextColor(screenLines[index].textColor);
@@ -2329,7 +2396,7 @@ void updateLine(const uint8_t row, const uint8_t index, const bool forced) {
 
 // Work with files just after they're uploaded
 void uploadLoop(void) {
-    if (lastUploadedFile != "") {
+    if (lastUploadedFile != emptyChar) {
         #ifdef VERSION_FRANCAISE
             trace_info_P("Reçu %s", lastUploadedFile.c_str());
         #else
@@ -2345,8 +2412,9 @@ void uploadLoop(void) {
             fileToStart = lastUploadedFile;
             writeSettings();
         }
-        lastUploadedFile = "";
+        lastUploadedFile = emptyChar;
         loadAgenda();
+        startDisplay();
         refreshPanel();
     }
 }
@@ -2659,7 +2727,7 @@ int readAllTables(READ_FILE_PARAMETERS) {
                             || agendaTable[index].lineType == typeBlinkingMessage
                             || agendaTable[index].lineType == typeScrollingMessage
                             || agendaTable[index].lineType == typeOutOfService) {
-                        strncpy(agendaTable[index].message, field, LINE_CHARACTERS+1);
+                        myStrncpy(agendaTable[index].message, field, LINE_CHARACTERS+1);
                     }
                 } else if (fieldCount == 4) {                       // Track
                     if (agendaTable[index].lineType == typeArrival || agendaTable[index].lineType == typeDeparture) {
@@ -2818,7 +2886,7 @@ void setup(void) {
     #endif
     Serial.setDebugOutput(false);                                   // To allow Serial.swap() to work properly
 
-    Serial.println("");
+    Serial.println(emptyChar);
     #ifdef VERSION_FRANCAISE
         trace_info_P("Initialise %s V%s", __FILENAME__, VERSION);
     #else
@@ -2914,7 +2982,7 @@ void setup(void) {
     #endif
 
     ssid.trim();
-    if (ssid != "") {                                               // If SSID is given, try to connect to
+    if (ssid != emptyChar) {                                               // If SSID is given, try to connect to
         #ifdef ESP32
             WiFi.mode(WIFI_MODE_STA);                               // Set station mode
         #endif
@@ -3037,7 +3105,7 @@ void setup(void) {
         // Send last log lines
         for (uint16_t i=0; i < LOG_MAX_LINES; i++) {
             String logLine = getLogLine(i, true);
-            if (logLine != "") {
+            if (logLine != emptyChar) {
                 client->send(logLine, "info");
             }
         }
