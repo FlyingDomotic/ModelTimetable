@@ -1,4 +1,4 @@
-#define VERSION "26.2.9-2"
+#define VERSION "26.2.12-2"
 
 /*
  *     English: Model timetable for train based on ESP8266 or ESP32
@@ -361,7 +361,9 @@ struct agendaTable_s {                                              // Agenda ta
     uint16_t textColor;                                             // Text color
     uint16_t backgroundColor;                                       // Background color
     lineType_t lineType;                                            // Agenda line type
-    char message[LINE_CHARACTERS+1];                                // Message
+    char track[2];                                                  // Track number
+    char train[5];                                                  // Train number
+    String message;                                                 // Message
 };
 
 // Indexes into displayParameters
@@ -1589,7 +1591,7 @@ void tableReceived(AsyncWebServerRequest *request) {
                 snprintf_P((char*) buffer, maxLen, "%s%3d %3d %4d %04x %04x %s\n", header, tableRow,
                     agendaTable[tableRow].lineType, agendaTable[tableRow].time,
                     agendaTable[tableRow].textColor, agendaTable[tableRow].backgroundColor,
-                    agendaTable[tableRow].message);
+                    agendaTable[tableRow].message.c_str());
             } else {
                 snprintf_P((char*) buffer, maxLen, "%s", header);
             }
@@ -2177,10 +2179,10 @@ void stopDisplay(void) {
 void setAgendaLine(uint16_t index, bool executeDisplay){
     if (agendaTable[index].lineType == typeFixedMessage) {
         additionalMessageChanged = true;
-        if (agendaTable[index].message[0]) {
+        if (agendaTable[index].message != "") {
             additionalMessageType = fixed;
             additionalMessageStepDuration = 1000;
-            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            myStrncpy(additionalMessage, agendaTable[index].message.c_str(), LINE_CHARACTERS+1);
             additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
             additionalMessageTextColor = agendaTable[index].textColor;
         } else {
@@ -2189,11 +2191,11 @@ void setAgendaLine(uint16_t index, bool executeDisplay){
         }
     } else if (agendaTable[index].lineType == typeBlinkingMessage) {
         additionalMessageChanged = true;
-        if (agendaTable[index].message[0]) {
+        if (agendaTable[index].message != "") {
             additionalMessageType = blinking;
             additionalMessageStepDuration = 1000;
             additionalMessageIndex = 0;
-            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            myStrncpy(additionalMessage, agendaTable[index].message.c_str(), LINE_CHARACTERS+1);
             additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
             additionalMessageTextColor = agendaTable[index].textColor;
         } else {
@@ -2202,11 +2204,11 @@ void setAgendaLine(uint16_t index, bool executeDisplay){
         }
     } else if (agendaTable[index].lineType == typeScrollingMessage) {
         additionalMessageChanged = true;
-        if (agendaTable[index].message[0]) {
+        if (agendaTable[index].message.c_str()) {
             additionalMessageType = scrolling;
             additionalMessageStepDuration = 200;
             additionalMessageIndex = 0;
-            myStrncpy(additionalMessage, agendaTable[index].message, LINE_CHARACTERS+1);
+            myStrncpy(additionalMessage, agendaTable[index].message.c_str(), LINE_CHARACTERS+1);
             additionalMessageBackgroundColor = agendaTable[index].backgroundColor;
             additionalMessageTextColor = agendaTable[index].textColor;
         } else {
@@ -2214,7 +2216,7 @@ void setAgendaLine(uint16_t index, bool executeDisplay){
             additionalMessage[0] = 0;
         }
     } else if (agendaTable[index].lineType == typeOutOfService) {
-        setOutOfService(agendaTable[index].message, emptyChar, 
+        setOutOfService(agendaTable[index].message.c_str(), emptyChar, 
             agendaTable[index].textColor, agendaTable[index].backgroundColor, executeDisplay);
     }
 }
@@ -2254,11 +2256,15 @@ void refreshPanel(void) {
                 || (agendaData.lineType == typeDeparture && currentType == DISPLAY_DEPARTURE)) {
             char message[LINE_CHARACTERS+1];                        // Create a message
             clearMessage(message);                                  // Clear it
-            myStrncpy(message, agendaData.message, LINE_CHARACTERS+1); // Copy message
-            // Clear track if line too far from now
-            if (deltaTime(agendaTable[i].time) > displayParams[currentType].maxTrackDelay) {
-                setMessage(message, " ", TRACK_OFFSET, TRACK_LENGTH);
+            char charTime[6];
+            formatTime(agendaData.time, charTime, 6);               // Load time
+            setMessage(message, charTime, TIME_OFFSET, TIME_LENGTH);// Time
+            setMessage(message, agendaData.message.c_str(), CITY_OFFSET, CITY_LENGTH); // City
+            // Copy track if line within track delay
+            if (deltaTime(agendaTable[i].time) <= displayParams[currentType].maxTrackDelay) {
+                setMessage(message, agendaData.track, TRACK_OFFSET, TRACK_LENGTH); // Track
             }
+            setMessage(message, agendaData.train, TRAIN_OFFSET, TRAIN_LENGTH); //Train            
             setText(message, line+DETAIL_LINES_OFFSET,              // Display line at right place with right color
                 ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor, true);
             line++;                                                 // Increment line count
@@ -2706,8 +2712,6 @@ int readAllTables(READ_FILE_PARAMETERS) {
                     if (agendaTable[index].time < agendaPreviousTime) {
                         return signalError(109, fieldCount, field);
                     }
-                    clearMessage(agendaTable[index].message);
-                    setMessage(agendaTable[index].message, field, TIME_OFFSET, TIME_LENGTH);
                 } else if (fieldCount == 2) {                       // Type
                     if (!strcmp(field, "A")) {                      // Arrivée/Arrival
                         agendaTable[index].lineType = typeArrival;
@@ -2724,18 +2728,12 @@ int readAllTables(READ_FILE_PARAMETERS) {
                     } else {
                         return signalError(105, 2, field);
                     }
-                } else if (fieldCount == 3) {                       // City
-                    if (agendaTable[index].lineType == typeArrival || agendaTable[index].lineType == typeDeparture) {
-                        setMessage(agendaTable[index].message, field, CITY_OFFSET, CITY_LENGTH);
-                    } else if (agendaTable[index].lineType == typeFixedMessage 
-                            || agendaTable[index].lineType == typeBlinkingMessage
-                            || agendaTable[index].lineType == typeScrollingMessage
-                            || agendaTable[index].lineType == typeOutOfService) {
-                        myStrncpy(agendaTable[index].message, field, LINE_CHARACTERS+1);
-                    }
+                } else if (fieldCount == 3) {                       // City or message
+                    agendaTable[index].message = field;
                 } else if (fieldCount == 4) {                       // Track
                     if (agendaTable[index].lineType == typeArrival || agendaTable[index].lineType == typeDeparture) {
-                        setMessage(agendaTable[index].message, field, TRACK_OFFSET, TRACK_LENGTH);
+                        agendaTable[index].track[0] = field[0];
+                        agendaTable[index].track[1] = 0;
                     } else if (agendaTable[index].lineType == typeFixedMessage 
                             || agendaTable[index].lineType == typeBlinkingMessage
                             || agendaTable[index].lineType == typeScrollingMessage
@@ -2746,7 +2744,10 @@ int readAllTables(READ_FILE_PARAMETERS) {
                     }
                 } else if (fieldCount == 5) {                       // Train #
                     if (agendaTable[index].lineType == typeArrival || agendaTable[index].lineType == typeDeparture) {
-                        setMessage(agendaTable[index].message, field, TRAIN_OFFSET, TRAIN_LENGTH);
+                        for (uint8_t i=0; i<4; i++) {
+                            agendaTable[index].train[i] = field[i];
+                        }
+                        agendaTable[index].train[4] = 0;
                     } else if (agendaTable[index].lineType == typeFixedMessage 
                             || agendaTable[index].lineType == typeBlinkingMessage
                             || agendaTable[index].lineType == typeScrollingMessage
@@ -2848,7 +2849,6 @@ int loadAgendaDetails(void) {
     delete[] agendaTable;                                           // Clear tables
 
     agendaTable = new agendaTable_s[agendaCount];                   // Create agenda table
-    memset(agendaTable, 0, agendaCount * sizeof(agendaTable_s));
 
     errorCode = readFile(fileToStart.c_str(), &readAllTables);      // Load all tables
     if (errorCode) return errorCode;
