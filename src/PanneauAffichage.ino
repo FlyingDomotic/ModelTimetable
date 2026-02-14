@@ -1,4 +1,4 @@
-#define VERSION "26.2.14-1"
+#define VERSION "26.2.14-2"
 
 /*
  *     English: Model timetable for train based on ESP8266 or ESP32
@@ -2361,8 +2361,8 @@ void refreshPanel(void) {
                 setMessage(message, agendaData.track, TRACK_OFFSET, TRACK_LENGTH); // Track
             }
             setMessage(message, agendaData.train, TRAIN_OFFSET, TRAIN_LENGTH); //Train            
-            // Will city fit into message?
-            if (strlen(agendaData.message.c_str()) <= CITY_LENGTH) {
+            // Will city fit into message (or delay between char null)?
+            if (strlen(agendaData.message.c_str()) <= CITY_LENGTH || (!waitBetweenChars)) {
                 // Yes, no scrolling
                 setScrollingParameters(detailLine(line));
                 setMessage(message, agendaData.message.c_str(), CITY_OFFSET, CITY_LENGTH); // City

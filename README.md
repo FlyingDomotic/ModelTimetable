@@ -26,15 +26,19 @@ On peut paramétrer l'écran pour afficher les départs, les arrivées, les deux
 
 Pour chaque mode (arrivée, départ), on précise :
 	- l'activation (ou pas) du mode,
-	- le temps d'affichage de l'écran avant de basculer sur le suivant,
-	- le nombre de ligne minimum à afficher,
-	- l'intervalle de temps avant le départ ou l'arrivée du train,
-	- l'intervalle de temps avant l'affichage du quai,
-	- la couleur de fond des lignes paires,
-	- la couleur de fond des lignes impaires.
+	- le temps d'affichage de l'écran avant de basculer sur le suivant (10 à 15 secondes),
+	- le nombre de ligne minimum à afficher (à zéro, seules les lignes répondant aux critères du paramètre suivant seront affichées, à 7 on aura toujours les 7 prochains départ/arrivées affichés),
+	- l'intervalle de temps avant le départ ou l'arrivée du train (en général, quelques heures),
+	- l'intervalle de temps avant l'affichage du quai (autour de 20 minutes),
+	- la couleur de fond des lignes paires (les valeurs par défaut correspondent aux couleurs SNCF),
+	- la couleur de fond des lignes impaires (même remarque).
 
 Chaque minute (simulée), le programme met à jour l'écran, en examinant les éléments (départ ou arrivée, selon le type qu'on affiche à cet instant) et en sélectionnant ceux qui seront actifs dans l'intervalle de temps indiqué (par exemple dans les 3 heures simulées à venir) ou jusqu'à remplir le nombre de lignes minimum à afficher (même si la ligne est en dehors l'intervalle). On s'arrête lorsque la page est pleine de lignes dans l'intervalle ou qu'on a affiché le nombre minimum de lignes ou qu'on a affiché toutes les mouvements du fichier agenda.
 
+De plus, lorsque les noms de ville sont trop longs pour être entièrement affichés, il est possible de définir :
+    - la durée pendant laquelle le début du nom sera affiché avant d'être défilant,
+    - la durée entre chaque caractères défilant (aucune défilement ne sera fait s'il reste à zéro),
+    - le nombre d'espaces affichés après le nom de ville avant de repasser au début du nom.
 
 L'application fonctionne sur un ESP8266, qui peut soit se connecter sur un réseau WiFi existant, soit créer son propre réseau Wifi. Le paramétrage s'effectue au travers d'un serveur Web embarqué, qui permet également de trouver le positionnement des LED et tester des couleurs, clignotants ou flashs en temps réel. Les messages sont affichés sur l'interface Web, et peuvent également être envoyés sur un serveur `syslog`.
 
