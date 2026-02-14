@@ -1,4 +1,4 @@
-#define VERSION "26.2.12-2"
+#define VERSION "26.2.14-1"
 
 /*
  *     English: Model timetable for train based on ESP8266 or ESP32
@@ -199,6 +199,9 @@ uint16_t startTimeMinute = 0;                                       //      and 
 uint16_t endTimeHour = 23;                                          // Simulation end hour
 uint16_t endTimeMinute = 59;                                        //      and minute
 float cycleTime = 10.0;                                             // Cycle duration in minutes
+uint16_t waitBeforeScroll = 0;                                      // Wait before scroll long names (ms)
+uint16_t waitBetweenChars = 0;                                      // Wait between chars in scroll
+uint8_t spacesAfterMessage = 0;                                     // Additional spaces after displaying scrolling names
 
 //  ---- Local to this program ----
 String resetCause = emptyChar;                                      // Used to save reset cause
@@ -252,15 +255,18 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 const uint8_t screenFlagNone = 0;                                   // No flags
 const uint8_t screenFlagTimeTableLine = 1;                          // This is a timetable line (else standard)
 const uint8_t screenFlagCentered = 2;                               // Line is centered (else set left)
-const uint8_t screenFlagCenterBackground = 4;                       // Line is centered (else set left)
+const uint8_t screenFlagCenterBackground = 4;                       // Background  is centered (else full line)
 const uint8_t screenFlagDontTrace = 128;                            // Don't trace line change
 
 // Screen storage
 struct screenStorage_s {
-    char* text;                                                     // Text to display
+    unsigned long scrollLastTime;                                   // Last we did a scroll for this line
     uint16_t textColor;                                             // Text color
     uint16_t oddBackgroundColor;                                    // Odd lines background color
     uint16_t evenBackgroundColor;                                   // Even lines background color
+    uint16_t agendaIndex;                                           // Original line in agenda
+    uint16_t scrollIndex;                                           // Index used by scrolling text functions
+    char* text;                                                     // Text to display
     uint8_t flags;                                                  // Flags
 };
 
@@ -385,7 +391,7 @@ typedef enum {
 
 int agendaError = -1;                                               // Error code of last agenda analysis
 char lastErrorMessage[100] = {0};                                   // Last agenda loading error message
-uint16_t agendaIndex = 0;                                           // Current position in agenda
+uint16_t agendaPtr = 0;                                             // Current position in agenda
 fileFormat_t fileFormat = unknownFileFormat;                        // Current header file format
 char configurationName[32] = {0};                                   // Configuration file name
 int tableLineNumber = 0;                                            // Table line number
@@ -495,6 +501,7 @@ bool isDebugCommand(const String givenCommand);
 
 //  ---- Display routines ----
 
+uint8_t detailLine(const uint8_t index);
 uint8_t getLineTopPixel(const uint8_t row);
 uint8_t getCharLeftPixel(const uint8_t column);
 void setOutOfService(const char* text, const char* message=emptyChar, 
@@ -503,9 +510,12 @@ void setOutOfService(const char* text, const char* message=emptyChar,
 void setDefaultOutOfService(const char* message=emptyChar, 
     const uint16_t textColor=ST7735_WHITE, const uint16_t backgroundColor=ST7735_BLACK);
 void setTitle(const char* title);
-void setText(const char* text, const int row, const int textColor, const int oddRowColor, const int evenRowColor,
-    const bool timeTableLine=true, bool const dontTrace=false, bool const center=false, const bool centerBackground=false);
-void setCenter(const char* text, const uint8_t row, const uint16_t textColor,
+void setScrollingParameters(const int row, const uint16_t agendaIndex=0, const unsigned long time=0, 
+    const uint16_t scrollIndex=0);
+void setText(const char* text, const int row, const int agendaIndex, const int textColor,
+    const int oddRowColor, const int evenRowColor, const bool timeTableLine=true, const bool dontTrace=false,
+    const bool center=false, const bool centerBackground=false);
+void setCenter(const char* text, const uint8_t row, const uint16_t agendaIndex, const uint16_t textColor,
     const uint16_t backgroundColor, const bool dontTrace=false, const bool centerBackground=false);
 bool setScroll(char* scrolledText, const char* text, const uint8_t pointer);
 bool isNotEmpty(char toTest);
@@ -870,6 +880,9 @@ void dumpSettings(void) {
     trace_info_P("endTime = %02d:%02d", endTimeHour, endTimeMinute);
     trace_info_P("cycleTime = %.1f", cycleTime);
     trace_info_P("fileToStart = %s", fileToStart.c_str());
+    trace_info_P("waitBeforeScroll = %d", waitBeforeScroll);
+    trace_info_P("waitBetweenChars = %d", waitBetweenChars);
+    trace_info_P("spacesAfterMessage = %d", spacesAfterMessage);
     trace_info_P("maxDelayArrival = %d",  displayParams[DISPLAY_ARRIVAL].maxDelay);
     trace_info_P("maxTrackDelayArrival = %d",  displayParams[DISPLAY_ARRIVAL].maxTrackDelay);
     trace_info_P("oddColorArrival = %d",  displayParams[DISPLAY_ARRIVAL].oddColor);
@@ -940,6 +953,9 @@ bool readSettings(void) {
     startTimeMinute = settings["startTimeMinute"].as<uint16_t>();
     endTimeHour = settings["endTimeHour"].as<uint16_t>();
     endTimeMinute = settings["endTimeMinute"].as<uint16_t>();
+    waitBeforeScroll = settings["waitBeforeScroll"].as<uint16_t>();
+    waitBetweenChars = settings["waitBetweenChars"].as<uint16_t>();
+    spacesAfterMessage = settings["spacesAfterMessage"].as<uint8_t>();
     cycleTime = settings["cycleTime"].as<float>();
     fileToStart = settings["fileToStart"].as<String>();
     displayParams[DISPLAY_ARRIVAL].maxDelay = settings["maxDelayArrival"].as<uint16_t>();
@@ -994,6 +1010,9 @@ void writeSettings(void) {
     settings["endTimeHour"] = endTimeHour;
     settings["endTimeMinute"] = endTimeMinute;
     settings["cycleTime"] = cycleTime;
+    settings["waitBeforeScroll"] = waitBeforeScroll;
+    settings["waitBetweenChars"] = waitBetweenChars;
+    settings["spacesAfterMessage"] = spacesAfterMessage;
     settings["fileToStart"] = fileToStart.c_str();
     settings["maxDelayArrival"] = displayParams[DISPLAY_ARRIVAL].maxDelay;
     settings["maxTrackDelayArrival"] = displayParams[DISPLAY_ARRIVAL].maxTrackDelay;
@@ -1124,6 +1143,9 @@ void debugReceived(AsyncWebServerRequest *request) {
     answer["startTimeMinute"] = startTimeMinute;
     answer["endTimeHour"] = endTimeHour;
     answer["endTimeMinute"] = endTimeMinute;
+    answer["waitBeforeScroll"] = waitBeforeScroll;
+    answer["waitBetweenChars"] = waitBetweenChars;
+    answer["spacesAfterMessage"] = spacesAfterMessage;
     answer["cycleTime"] = cycleTime;
     answer["simulationTime"] = simulationTime;
     answer["simulationStart"] = simulationStart;
@@ -1131,7 +1153,7 @@ void debugReceived(AsyncWebServerRequest *request) {
     answer["minuteDuration"] = minuteDuration;
     answer["simulationActive"] = simulationActive;
     answer["agendaError"] = agendaError;
-    answer["agendaIndex"] = agendaIndex;
+    answer["agendaPtr"] = agendaPtr;
     #ifdef ESP32
         answer["freeMemory"] = ESP.getFreeHeap();
         answer["largestChunk"] = ESP.getMaxAllocHeap();
@@ -1353,6 +1375,18 @@ void setChangedReceived(AsyncWebServerRequest *request) {
                 displayParams[DISPLAY_DEPARTURE].minLines = fieldValue.toInt();
             } else if (fieldName == "headerDeparture") {
                 displayParams[DISPLAY_DEPARTURE].header = fieldValue;
+            } else if (fieldName == "waitBeforeScroll") {
+                if (atol(fieldValue.c_str()) >= 0 && atol(fieldValue.c_str()) <= 9999) {
+                    waitBeforeScroll = atol(fieldValue.c_str());
+                }
+            } else if (fieldName == "waitBetweenChars") {
+                if (atol(fieldValue.c_str()) >= 1 && atol(fieldValue.c_str()) <= 9999) {
+                    waitBetweenChars = atol(fieldValue.c_str());
+                }
+            } else if (fieldName == "spacesAfterMessage") {
+                if (atol(fieldValue.c_str()) >= 0 && atol(fieldValue.c_str()) <= LINE_CHARACTERS) {
+                    spacesAfterMessage = atol(fieldValue.c_str());
+                }
             } else if (fieldName == "start") {
                 startDisplay();
                 dontWriteSettings = true;
@@ -1583,7 +1617,7 @@ void tableReceived(AsyncWebServerRequest *request) {
         }
         memset(buffer, 0, maxLen);                                  // Clear buffer
         char header[100] = {0};                                     // Clear header
-        if (tablePtr ==  0) {                                       // Room table
+        if (tablePtr ==  2) {                                       // Room table
             if (!tableRow)  {                                       // Set header
                 snprintf_P(header, sizeof(header), "Row Flg Time Text Fore Message (%s)\n", agendaName);
             }
@@ -1600,14 +1634,33 @@ void tableReceived(AsyncWebServerRequest *request) {
                 tablePtr++;                                         // Next table
                 tableRow = 0;                                       // Clear index
             }
-        } else if (tablePtr ==  1) {                                // Screen table
+        } else if (tablePtr ==  0) {                                // Screen table
             if (!tableRow)  {                                       // Set header
-                snprintf_P(header, sizeof(header), "Row Flg TxtC OddC  EveC Message (Screen)\n");
+                snprintf_P(header, sizeof(header), "Row Flg TxtC OddC EveC AgId sId  scTime  Message (Screen)\n");
             }
-            snprintf_P((char*) buffer, maxLen, "%s%3d %3d %04x %04x %04x %s\n", header, tableRow,
+            snprintf_P((char*) buffer, maxLen, "%s%3d %3d %04x %04x %04x %04d %03d %04x%04x %s\n", header, tableRow,
                 screenLines[tableRow].flags, screenLines[tableRow].textColor,
                 screenLines[tableRow].oddBackgroundColor, screenLines[tableRow].evenBackgroundColor,
+                screenLines[tableRow].agendaIndex, screenLines[tableRow].scrollIndex,
+                (unsigned int) screenLines[tableRow].scrollLastTime >> 16,
+                (unsigned int) screenLines[tableRow].scrollLastTime & 0xffff,
                 screenLines[tableRow].text);
+            tableRow++;                                             // Next table index
+            if (tableRow >= SCREEN_LINES) {                         // Are we at end of table?
+                tablePtr++;                                         // Next table
+                tableRow = 0;                                       // Clear index
+            }
+        } else if (tablePtr ==  1) {                                // Previous table
+            if (!tableRow)  {                                       // Set header
+                snprintf_P(header, sizeof(header), "Row Flg TxtC OddC EveC AgId sId  scTime  Message (Previous)\n");
+            }
+            snprintf_P((char*) buffer, maxLen, "%s%3d %3d %04x %04x %04x %04d %03d %04x%04x %s\n", header, tableRow,
+                previousLines[tableRow].flags, previousLines[tableRow].textColor,
+                previousLines[tableRow].oddBackgroundColor, previousLines[tableRow].evenBackgroundColor,
+                previousLines[tableRow].agendaIndex, previousLines[tableRow].scrollIndex,
+                (unsigned int) previousLines[tableRow].scrollLastTime >> 16,
+                (unsigned int) previousLines[tableRow].scrollLastTime & 0xffff,
+                previousLines[tableRow].text);
             tableRow++;                                             // Next table index
             if (tableRow >= SCREEN_LINES) {                         // Are we at end of table?
                 tablePtr++;                                         // Next table
@@ -1909,6 +1962,11 @@ void setOutOfService(const char* text, const char* message,
     if (executeDisplay) updateScreen();
 }
 
+// Return position of a detail line into screenLines array
+uint8_t detailLine(const uint8_t index) {
+    return index + DETAIL_LINES_OFFSET;
+}
+
 // Return top position of text line (starts at 0)
 uint8_t getLineTopPixel(const uint8_t row) {
     return row * (PIXEL_HEIGHT + 1);
@@ -1921,14 +1979,16 @@ uint8_t getCharLeftPixel(const uint8_t column) {
 
 // Set screen title (first 2 lignes)
 void setTitle(const char* title) {
-    setCenter(title, 0, ST7735_WHITE, ST7735_BLACK);
-    setCenter(emptyChar, 1, ST7735_BLACK, ST7735_BLACK);
+    setCenter(title, 0, 0, ST7735_WHITE, ST7735_BLACK);
+    setCenter(emptyChar, 1, 0, ST7735_BLACK, ST7735_BLACK);
 }
 
 // Center a line on screen
-void setCenter(const char* text, const uint8_t row, const uint16_t textColor, const uint16_t backgroundColor,
-        const bool dontTrace, const bool centerBackground) {
-    setText(text, row, textColor, backgroundColor, backgroundColor, false, dontTrace, true, centerBackground);
+void setCenter(const char* text, const uint8_t row, const uint16_t agendaIndex, const uint16_t textColor,
+        const uint16_t backgroundColor, const bool dontTrace, const bool centerBackground) {
+    setScrollingParameters(row);                                    // Clear sccrolling parameters
+    setText(text, row, agendaIndex, textColor,                      // Set text and colors
+        backgroundColor, backgroundColor, false, dontTrace, true, centerBackground);
 }
 
 // Overwrite a buffer with scrolled text giving a pointer (return true on pointer overflow)
@@ -1951,13 +2011,23 @@ bool isNotEmpty(char* toTest){
     return false;
 }
 
+// Set scrolling parameters for a line
+void setScrollingParameters(const int row, const uint16_t agendaIndex,
+    const unsigned long time, const uint16_t scrollIndex) {
+    screenLines[row].agendaIndex = agendaIndex;
+    screenLines[row].scrollLastTime = time;
+    screenLines[row].scrollIndex = scrollIndex;
+}
+
 // Set text line given a text color, and a background color for odd and even row
-void setText(const char* text, const int row, const int textColor, const int oddRowColor, const int evenRowColor,
-        const bool timeTableLine, const bool dontTrace, const bool center, const bool centerBackground) {
+void setText(const char* text, const int row, const int agendaIndex, const int textColor,
+        const int oddRowColor, const int evenRowColor, const bool timeTableLine, const bool dontTrace,
+        const bool center, const bool centerBackground) {
     myStrncpy(screenLines[row].text, text, LINE_CHARACTERS+1);
     screenLines[row].textColor = textColor;
     screenLines[row].oddBackgroundColor = oddRowColor;
     screenLines[row].evenBackgroundColor = evenRowColor;
+    screenLines[row].agendaIndex = agendaIndex;
     screenLines[row].flags =
         (timeTableLine? screenFlagTimeTableLine : screenFlagNone) |
         (dontTrace? screenFlagDontTrace : screenFlagNone) |
@@ -1979,12 +2049,18 @@ void displaySetup(void) {
         screenLines[i].oddBackgroundColor = 0;
         screenLines[i].evenBackgroundColor = 0;
         screenLines[i].flags = 0;
+        screenLines[i].agendaIndex = 0;
+        screenLines[i].scrollIndex = 0;
+        screenLines[i].scrollLastTime = 0;
         previousLines[i].text = (char *) &previousTexts[i];         // Set previous line pointer
         clearMessage(previousLines[i].text);
         previousLines[i].textColor = 0;
         previousLines[i].oddBackgroundColor = 0;
         previousLines[i].evenBackgroundColor = 0;
         previousLines[i].flags = 0;
+        previousLines[i].agendaIndex = 0;
+        previousLines[i].scrollIndex = 0;
+        previousLines[i].scrollLastTime = 0;
     }
     setDefaultOutOfService();                                       // Set default out of message
     updateScreen(true);                                             // Display OOS message on screen
@@ -1992,6 +2068,7 @@ void displaySetup(void) {
 
 // Loop for display
 void displayLoop(void) {
+    bool refreshNeeded = false;
     unsigned long now = millis();
     if (simulationActive && !agendaError) {
         // Does switch timeout?
@@ -2034,21 +2111,22 @@ void displayLoop(void) {
                 events.send(buffer, "data");
             }
             // Execute actions from current position in simulation up to current time
-            if (agendaIndex < agendaCount && agendaTable[agendaIndex].time <= simulationTime) {
+            if (agendaPtr < agendaCount && agendaTable[agendaPtr].time <= simulationTime) {
                 char buffer[6];
                 formatTime(simulationTime, buffer, sizeof(buffer));
                 #ifdef VERSION_FRANCAISE
-                    trace_info_P("Agenda %d, maintenant %s", agendaIndex+AGENDA_OFFSET, buffer);
+                    trace_info_P("Agenda %d, maintenant %s", agendaPtr+AGENDA_OFFSET, buffer);
                 #else
-                    trace_info_P("Agenda %d, now %s", agendaIndex+AGENDA_OFFSET, buffer);
+                    trace_info_P("Agenda %d, now %s", agendaPtr+AGENDA_OFFSET, buffer);
                 #endif
-                while (agendaIndex < agendaCount && agendaTable[agendaIndex].time <= simulationTime) {
-                    setAgendaLine(agendaIndex);
-                    agendaIndex++;
+                while (agendaPtr < agendaCount && agendaTable[agendaPtr].time <= simulationTime) {
+                    setAgendaLine(agendaPtr);
+                    agendaPtr++;
                 }
                 if (additionalMessageChanged) {
                     trace_debug_P("Message >%s<, type %d", additionalMessage, additionalMessageType);
                     displayAdditionalMessage();
+                    refreshNeeded = true;
                 }
             }
             simulationTime++;                                       // Simulation is one minute later
@@ -2062,40 +2140,59 @@ void displayLoop(void) {
                 #else
                     trace_info_P("Going from %s to %s", buffer, buffer2);
                 #endif
-                agendaIndex = 0;                                    // Reset agendaIndex
+                agendaPtr = 0;                                      // Reset agenda pointer
                 additionalMessageChanged = false;
                 // Position index to start time
-                while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
-                    setAgendaLine(agendaIndex, false);
-                    agendaIndex++;
+                while (agendaPtr < agendaCount && agendaTable[agendaPtr].time < simulationStart) {
+                    setAgendaLine(agendaPtr, false);
+                    agendaPtr++;
                 }
                 if (additionalMessageChanged) {
                     trace_debug_P("Message >%s<, type %d", additionalMessage, additionalMessageType);
                     displayAdditionalMessage();
+                    refreshNeeded = true;
                 }
             }
-            refreshPanel();
-            displayLastRun = now;                                   // Set last run time
+            refreshNeeded = true;
         }
     }
     // Advance additional message index every second
     if ((now - additionalMessageLastTime) > additionalMessageStepDuration) {
         displayAdditionalMessage();
+        refreshNeeded = true;
+    }
+
+    // Update scrolling lines pointers
+    for (uint8_t i = detailLine(0); i < detailLine(MAX_DETAIL_LINES); i++) {
+        // Does this line scroll?
+        if (previousLines[i].scrollLastTime) {
+            // Is timer expired
+            if ((now - previousLines[i].scrollLastTime) > (previousLines[i].scrollIndex ? waitBetweenChars : waitBeforeScroll)) {
+                // Increment index and set time
+                previousLines[i].scrollIndex++;
+                previousLines[i].scrollLastTime = now;
+                refreshNeeded = true;
+            }
+        }
+    }
+    if (refreshNeeded) {
+        refreshPanel();
+        displayLastRun = now;                                   // Set last run time
     }
 }
 
 // Display additional message if needed
 void displayAdditionalMessage() {
     if (additionalMessageType == fixed) {
-        setCenter(additionalMessage, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
+        setCenter(additionalMessage, MAX_DETAIL_LINES + 1, 0, additionalMessageTextColor,
             additionalMessageBackgroundColor, true);
     } 
     if (additionalMessageType == blinking) {
         if (additionalMessageIndex & 1) {
-            setCenter(emptyChar, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
+            setCenter(emptyChar, MAX_DETAIL_LINES + 1, 0, additionalMessageTextColor,
                 additionalMessageBackgroundColor, true);
         } else {
-            setCenter(additionalMessage, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
+            setCenter(additionalMessage, MAX_DETAIL_LINES + 1, 0, additionalMessageTextColor,
                 additionalMessageBackgroundColor, true);
         }
     } 
@@ -2105,13 +2202,12 @@ void displayAdditionalMessage() {
         if (setScroll(message, additionalMessage, additionalMessageIndex)) {
             additionalMessageIndex = -1;
         } else {
-            setCenter(message, MAX_DETAIL_LINES + 1, additionalMessageTextColor,
+            setCenter(message, MAX_DETAIL_LINES + 1, 0, additionalMessageTextColor,
                 additionalMessageBackgroundColor, true);
         }
     } 
     additionalMessageIndex++;
     additionalMessageLastTime = millis();
-    refreshPanel();
 }
 
 // Called when display parameters changed
@@ -2141,23 +2237,24 @@ void startDisplay(void) {
         #endif
         // Turn everything off
         setOutOfService(emptyChar);
-        agendaIndex = 0;
+        agendaPtr = 0;
         additionalMessageChanged = false;
         // Play one time all events
-        while (agendaIndex < agendaCount) {
-            setAgendaLine(agendaIndex, false);
-            agendaIndex++;
+        while (agendaPtr < agendaCount) {
+            setAgendaLine(agendaPtr, false);
+            agendaPtr++;
         }
         simulationTime = simulationStart;
-        agendaIndex = 0;
+        agendaPtr = 0;
         // Position index to start time
-        while (agendaIndex < agendaCount && agendaTable[agendaIndex].time < simulationStart) {
-            setAgendaLine(agendaIndex, false);
-            agendaIndex++;
+        while (agendaPtr < agendaCount && agendaTable[agendaPtr].time < simulationStart) {
+            setAgendaLine(agendaPtr, false);
+            agendaPtr++;
         }
         if (additionalMessageChanged) {
             trace_debug_P("Message >%s<, type %d", additionalMessage, additionalMessageType);
             displayAdditionalMessage();
+            refreshPanel();
         }
     }
     sendAnUpdateFlag = true;
@@ -2244,8 +2341,8 @@ void refreshPanel(void) {
     if (agendaError) return;
     // Display header if type change
     setTitle(displayParams[currentType].header.c_str());
-    // Scan agenda starting at agendaIndex until we exceed .maxDelay and .minLine or looped on agenda
-    uint16_t i = agendaIndex;
+    // Scan agenda starting at agendaPtr until we exceed .maxDelay and .minLine or looped on agenda
+    uint16_t i = agendaPtr;
     uint8_t line = 0;
     uint8_t maxLine = additionalMessageType != unknown ? MAX_DETAIL_LINES-1 : MAX_DETAIL_LINES;
     while (deltaTime(agendaTable[i].time) < displayParams[currentType].maxDelay || line < displayParams[currentType].minLines) {
@@ -2259,23 +2356,52 @@ void refreshPanel(void) {
             char charTime[6];
             formatTime(agendaData.time, charTime, 6);               // Load time
             setMessage(message, charTime, TIME_OFFSET, TIME_LENGTH);// Time
-            setMessage(message, agendaData.message.c_str(), CITY_OFFSET, CITY_LENGTH); // City
             // Copy track if line within track delay
             if (deltaTime(agendaTable[i].time) <= displayParams[currentType].maxTrackDelay) {
                 setMessage(message, agendaData.track, TRACK_OFFSET, TRACK_LENGTH); // Track
             }
             setMessage(message, agendaData.train, TRAIN_OFFSET, TRAIN_LENGTH); //Train            
-            setText(message, line+DETAIL_LINES_OFFSET,              // Display line at right place with right color
-                ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor, true);
+            // Will city fit into message?
+            if (strlen(agendaData.message.c_str()) <= CITY_LENGTH) {
+                // Yes, no scrolling
+                setScrollingParameters(detailLine(line));
+                setMessage(message, agendaData.message.c_str(), CITY_OFFSET, CITY_LENGTH); // City
+            } else {                                                // No, use scrolling
+                // Set initial scrolling parameters
+                setScrollingParameters(detailLine(line), i, millis());
+                // Try to locate index into previous screen data
+                for (uint8_t j=detailLine(0); j < detailLine(maxLine); j++) {
+                    if (previousLines[j].agendaIndex == i) {        // Same agenda index?
+                        setScrollingParameters(detailLine(line),    // Copy scrolling paramaters from previous table
+                            i,
+                            previousLines[j].scrollLastTime,
+                            previousLines[j].scrollIndex);
+                        break;
+                    }
+                }
+                // Reset message pointer if needed
+                if (screenLines[detailLine(line)].scrollIndex > 
+                        (strlen(agendaData.message.c_str()) + spacesAfterMessage - CITY_LENGTH)) {
+                    screenLines[detailLine(line)].scrollIndex = 0;
+                }
+                setMessage(message, 
+                    agendaData.message.substring(screenLines[detailLine(line)].scrollIndex).c_str(),
+                    CITY_OFFSET, CITY_LENGTH);                      // City
+            }
+            setText(message, detailLine(line), i,                   // Display line at right place with right color
+                ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor);
             line++;                                                 // Increment line count
         }
         i++;                                                        // Next agenda line
-        if (i == agendaIndex) break;                                // Check if we looped on agenda, exit if so
+        if (i == agendaPtr) break;                                  // Check if we looped on agenda, exit if so
         if (i >= agendaCount) i = 0;                                // Return to zero if at end of agenda
         if (line >= maxLine) break;                                 // Exit if we fully loaded table
     }
+    
+    // Clears remaining lines
     for (; line < maxLine; line++) {
-        setText(emptyChar, line+DETAIL_LINES_OFFSET,                       // Display line at right place with right color
+        setScrollingParameters(detailLine(line));           // Clear scrolling parameters
+        setText(emptyChar, detailLine(line), 0,             // Clear line content
             ST7735_WHITE, displayParams[currentType].oddColor, displayParams[currentType].evenColor, true);
 
     }
@@ -2289,7 +2415,10 @@ bool didLineChanged(const uint8_t row) {
         (previousLines[row].textColor != screenLines[row].textColor) ||
         (previousLines[row].oddBackgroundColor != screenLines[row].oddBackgroundColor) ||
         (previousLines[row].evenBackgroundColor != screenLines[row].evenBackgroundColor) ||
-        (previousLines[row].flags != screenLines[row].flags);
+        (previousLines[row].flags != screenLines[row].flags) |
+        (previousLines[row].agendaIndex != screenLines[row].agendaIndex) |
+        (previousLines[row].scrollLastTime != screenLines[row].scrollLastTime) |
+        (previousLines[row].scrollIndex != screenLines[row].scrollIndex);
 }
 
 // Save new values of a screen line
@@ -2299,6 +2428,9 @@ void saveScreen(const uint8_t row) {
     previousLines[row].oddBackgroundColor = screenLines[row].oddBackgroundColor;
     previousLines[row].evenBackgroundColor = screenLines[row].evenBackgroundColor;
     previousLines[row].flags = screenLines[row].flags;
+    previousLines[row].agendaIndex = screenLines[row].agendaIndex;
+    previousLines[row].scrollLastTime = screenLines[row].scrollLastTime;
+    previousLines[row].scrollIndex = screenLines[row].scrollIndex;
 }
 
 // Update screen when changed (or forced)

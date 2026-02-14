@@ -78,6 +78,19 @@
             <hr />
             <table align="center">
                 <tr>
+                    <td align="right"><label data-i18n-key="waitBeforeScroll">Wait before scroll (ms)</label>&nbsp;</td>
+                    <td><input type="number" id="waitBeforeScroll" size="6" onchange="changed(this);"/></td>
+                </tr>
+                <tr>
+                    <td align="right"><label data-i18n-key="waitBetweenChars">Wait between characters (ms)</label>&nbsp;</td>
+                    <td><input type="number" id="waitBetweenChars" size="6" onchange="changed(this);"/></td>
+                </tr>
+                <tr>
+                    <td align="right"><label data-i18n-key="spacesAfterMessage">Number of spaces after message</label>&nbsp;</td>
+                    <td><input type="number" id="spacesAfterMessage" size="6" onchange="changed(this);"/></td>
+                </tr>
+                <hr />
+                <tr>
                     <td align="right"><label data-i18n-key="ssid">Wifi SSID:</label>&nbsp;</td>
                     <td><input type="text" id="ssid" maxlen="32" size="32" onchange="changed(this);"/></td>
                 </tr>
